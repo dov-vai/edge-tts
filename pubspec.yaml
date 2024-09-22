@@ -1,5 +1,5 @@
 name: edge_tts
-description: "Microsoft Edge TTS (Read-Aloud) API"
+description: "Microsoft Edge TTS (Read-Aloud). No API keys required."
 version: 0.0.1
 homepage:
 
@@ -10,6 +10,9 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  http: ^1.2.2
+  uuid: ^4.5.0
+  web_socket_channel: ^3.0.1
 
 dev_dependencies:
   flutter_test:
