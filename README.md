@@ -11,8 +11,9 @@ and the Flutter guide for
 [developing packages and plugins](https://flutter.dev/to/develop-packages).
 -->
 
-TODO: Put a short description of the package here that helps potential users
-know whether this package might be useful for them.
+Microsoft Edge TTS (Read-Aloud). No API keys required.
+
+Port of [edge-tts](https://github.com/rany2/edge-tts) project for Python. Thank you!
 
 ## Features
 
