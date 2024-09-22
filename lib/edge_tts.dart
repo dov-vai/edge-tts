@@ -1,7 +1,5 @@
 library edge_tts;
 
-/// A Calculator.
-class Calculator {
-  /// Returns [value] plus 1.
-  int addOne(int value) => value + 1;
-}
+export 'src/list_voices.dart' show listVoices, VoicesManager;
+export 'src/models.dart' show TTSConfig;
+
