@@ -6,4 +6,9 @@ void main() {
   test('listVoices doesn\'t throw exception', () async {
     expect (listVoices(), completes);
   });
+
+  test('audio saved without exceptions', () async {
+    var communicate = Communicate(text: "hello", voice: "en-US-AvaNeural");
+    expect(communicate.save("hey.mp3"), completes);
+  });
 }
