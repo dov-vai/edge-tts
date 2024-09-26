@@ -17,24 +17,19 @@ Port of [edge-tts](https://github.com/rany2/edge-tts) project for Python. Thank 
 
 ## Features
 
-TODO: List what your package can do. Maybe include images, gifs, or videos.
+- Microsoft Edge Text-To-Speech
+- Save audio, subtitles
+- List, select voices
 
 ## Getting started
 
-TODO: List prerequisites and provide or point to information on how to
-start using the package.
+Simple example on how to save audio is below. More examples available in the examples section.
 
 ## Usage
 
-TODO: Include short and useful examples for package users. Add longer examples
-to `/example` folder.
-
 ```dart
-const like = 'sample';
+import 'package:edge_tts/edge_tts.dart' as edge_tts;
+// ...
+var comm = edge_tts.Communicate(text:"hey hey hey");
+comm.save("hey.mp3");
 ```
-
-## Additional information
-
-TODO: Tell users more about the package: where to find more information, how to
-contribute to the package, how to file issues, what response they can expect
-from the package authors, and more.
