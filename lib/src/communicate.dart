@@ -3,117 +3,26 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:uuid/uuid.dart';
+import 'package:edge_tts/src/utils/comm_utils.dart';
 
 import 'constants.dart';
 import 'exceptions.dart';
 import 'models.dart';
 
-(Map<String, Uint8List>, Uint8List) getHeadersAndData(
-    Uint8List data, int headerLength) {
-  final headers = <String, Uint8List>{};
-  final headerData = data.sublist(0, headerLength);
-  final lines = String.fromCharCodes(headerData).split('\r\n');
+class CommState {
+  String partialText;
+  int offsetCompensation;
+  int lastDurationOffset;
+  bool streamWasCalled;
 
-  for (var line in lines) {
-    final parts = line.split(':');
-    String key = parts[0];
-    String value = parts.length > 1 ? parts.sublist(1).join(':') : '';
-    headers[key] = Uint8List.fromList(value.trim().codeUnits);
-  }
-
-  final remainingData = data.sublist(headerLength + 2);
-  return (headers, remainingData);
-}
-
-String removeIncompatibleCharacters(String string) {
-  // Removes unsupported characters (such as vertical tabs).
-  var chars = string.split('');
-  for (var i = 0; i < chars.length; i++) {
-    var code = chars[i].codeUnitAt(0);
-    if ((0 <= code && code <= 8) ||
-        (11 <= code && code <= 12) ||
-        (14 <= code && code <= 31)) {
-      chars[i] = ' ';
-    }
-  }
-  return chars.join('');
-}
-
-String connectId() => const Uuid().v4().replaceAll('-', '');
-
-Stream<String> splitTextByByteLength(String text, int byteLength) async* {
-  var utf8Text = utf8.encode(text);
-  while (utf8Text.length > byteLength) {
-    // Find last space
-    var splitAt = utf8Text.sublist(0, byteLength).lastIndexOf(32);
-
-    splitAt = splitAt == -1 ? byteLength : splitAt;
-
-    // Ensure proper handling of & symbols
-    while (utf8Text.sublist(0, splitAt).contains(38)) {
-      var ampersandIndex = utf8Text.sublist(0, splitAt).lastIndexOf(38);
-      if (utf8Text.sublist(ampersandIndex, splitAt).contains(59)) {
-        break;
-      }
-      splitAt = ampersandIndex - 1;
-
-      if (splitAt == 0) {
-        break;
-      }
-    }
-
-    var chunk =
-        utf8Text.sublist(0, splitAt).map((e) => String.fromCharCode(e)).join();
-    yield chunk;
-    utf8Text = utf8Text.sublist(splitAt);
-  }
-  yield utf8Text.map((e) => String.fromCharCode(e)).join();
-}
-
-String mkSSML(TTSConfig config, String escapedText) {
-  return "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>"
-      "<voice name='${config.voice}'>"
-      "<prosody pitch='${config.pitch}' rate='${config.rate}' volume='${config.volume}'>"
-      "$escapedText"
-      "</prosody>"
-      "</voice>"
-      "</speak>";
-}
-
-String dateToString() {
-  // Javascript-style date string.
-  return HttpDate.format(DateTime.now().toUtc());
-}
-
-String ssmlHeadersPlusData(String requestId, String timestamp, String ssml) {
-  return "X-RequestId:$requestId\r\n"
-      "Content-Type:application/ssml+xml\r\n"
-      "X-Timestamp:${timestamp}Z\r\n"
-      "Path:ssml\r\n\r\n"
-      "$ssml";
-}
-
-int calcMaxMsgSize(TTSConfig ttsConfig) {
-  const int websocketMaxSize = 65536; // 2^16
-  var overheadPerMessage =
-      ssmlHeadersPlusData(connectId(), dateToString(), mkSSML(ttsConfig, '')).length + 50;
-  return websocketMaxSize - overheadPerMessage;
-}
-
-String xmlEscape(String input) {
-  return input
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&apos;');
+  CommState(this.partialText, this.offsetCompensation, this.lastDurationOffset,
+      this.streamWasCalled);
 }
 
 class Communicate {
   late TTSConfig ttsConfig;
   late Stream<String> texts;
-  late Map<String, dynamic> state;
+  late CommState state;
   String? proxy;
   int connectTimeout;
   int receiveTimeout;
@@ -130,15 +39,11 @@ class Communicate {
       this.receiveTimeout = 60}) {
     ttsConfig =
         TTSConfig(voice: voice, rate: rate, volume: volume, pitch: pitch);
-    texts = splitTextByByteLength(xmlEscape(removeIncompatibleCharacters(text)),
-        calcMaxMsgSize(ttsConfig));
+    texts = CommUtils.splitTextByByteLength(
+        CommUtils.xmlEscape(CommUtils.removeIncompatibleCharacters(text)),
+        CommUtils.calcMaxMsgSize(ttsConfig));
 
-    state = {
-      'partial_text': null,
-      'offset_compensation': 0,
-      'last_duration_offset': 0,
-      'stream_was_called': false
-    };
+    state = CommState("", 0, 0, false);
   }
 
   Map<String, dynamic> _parseMetadata(Uint8List data) {
@@ -150,7 +55,7 @@ class Communicate {
 
       if (metaType == 'WordBoundary') {
         final currentOffset =
-            metaObj['Data']['Offset'] + state['offset_compensation'];
+            metaObj['Data']['Offset'] + state.offsetCompensation;
         final currentDuration = metaObj['Data']['Duration'];
         return {
           'type': metaType,
@@ -171,7 +76,7 @@ class Communicate {
   }
 
   void _sendCommandRequest(WebSocket socket) {
-    socket.add("X-Timestamp:${dateToString()}\r\n"
+    socket.add("X-Timestamp:${CommUtils.dateToString()}\r\n"
         "Content-Type:application/json; charset=utf-8\r\n"
         "Path:speech.config\r\n\r\n"
         '{"context":{"synthesis":{"audio":{"metadataoptions":{'
@@ -181,12 +86,14 @@ class Communicate {
   }
 
   void _sendSSMLRequest(WebSocket socket) {
-    socket.add(ssmlHeadersPlusData(
-        connectId(), dateToString(), mkSSML(ttsConfig, state["partial_text"])));
+    socket.add(CommUtils.ssmlHeadersPlusData(
+        CommUtils.connectId(),
+        CommUtils.dateToString(),
+        CommUtils.mkSSML(ttsConfig, state.partialText)));
   }
 
   Stream<Map<String, dynamic>> _stream() async* {
-    final uri = Uri.parse('$wssUrl&ConnectionId=${connectId()}');
+    final uri = Uri.parse('$wssUrl&ConnectionId=${CommUtils.connectId()}');
     final headers = {
       "Pragma": "no-cache",
       "Cache-Control": "no-cache",
@@ -209,8 +116,8 @@ class Communicate {
     await for (var received in ws) {
       if (received is String) {
         final encodedData = utf8.encode(received);
-        final parametersAndData =
-            getHeadersAndData(encodedData, received.indexOf('\r\n\r\n'));
+        final parametersAndData = CommUtils.getHeadersAndData(
+            encodedData, received.indexOf('\r\n\r\n'));
 
         final pathBinary = parametersAndData.$1['Path'];
         if (pathBinary == null) continue;
@@ -219,7 +126,7 @@ class Communicate {
         if (path == 'audio.metadata') {
           final parsedMetadata = _parseMetadata(parametersAndData.$2);
           yield parsedMetadata;
-          state['last_duration_offset'] =
+          state.lastDurationOffset =
               parsedMetadata['offset'] + parsedMetadata['duration'];
         } else if (path == 'turn.end') {
           // Use average padding (8750000) typically added by the service
@@ -227,8 +134,7 @@ class Communicate {
           // well for now, but we might ultimately need to use a
           // more sophisticated method like using ffmpeg to get
           // the actual duration of the audio data.
-          state['offset_compensation'] =
-              state['last_duration_offset'] + 8750000;
+          state.offsetCompensation = state.lastDurationOffset + 8750000;
           break;
         } else if (!['response', 'turn.start'].contains(path)) {
           throw UnknownResponse('Unknown path received');
@@ -247,7 +153,7 @@ class Communicate {
         }
 
         final parametersAndData =
-            getHeadersAndData(receivedBinary, headerLength);
+            CommUtils.getHeadersAndData(receivedBinary, headerLength);
 
         final pathBinary = parametersAndData.$1['Path'];
         if (pathBinary == null) continue;
@@ -281,13 +187,13 @@ class Communicate {
   }
 
   Stream<Map<String, dynamic>> stream() async* {
-    if (state["stream_was_called"]) {
+    if (state.streamWasCalled) {
       throw Exception("stream can only be called once.");
     }
-    state["stream_was_called"] = true;
+    state.streamWasCalled = true;
 
     await for (var text in texts) {
-      state["partial_text"] = text;
+      state.partialText = text;
       await for (var message in _stream()) {
         yield message;
       }
