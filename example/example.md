@@ -35,6 +35,16 @@ await for (var message in communicate.stream()) {
 }
 ```
 
+# Dynamic voice selection
+```dart
+/// ...
+var manager = await edge_tts.VoicesManager.create();
+var voices = manager.find(gender: "Male", locale: "es");
+
+var comm = edge_tts.Communicate("hey hey hey", voices[0].name);
+await comm.save("hey.mp3");
+```
+
 # More examples
 More examples can be found in original Python project, this package should mimic its behavior, so it should be fairly simple to apply them here too:
 https://github.com/rany2/edge-tts/tree/master/examples
