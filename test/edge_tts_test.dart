@@ -11,4 +11,10 @@ void main() {
     var communicate = Communicate(text: "hello", voice: "en-US-AvaNeural");
     expect(communicate.save("hey.mp3"), completes);
   });
+
+  test('voicesManager finds male Spanish voices ', () async {
+    var manager = await VoicesManager.create();
+    var voices = manager.find(gender: 'Male', locale: 'es');
+    expect(voices, isNotEmpty);
+  });
 }
