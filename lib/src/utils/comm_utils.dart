@@ -64,14 +64,11 @@ class CommUtils {
         }
       }
 
-      var chunk = utf8Text
-          .sublist(0, splitAt)
-          .map((e) => String.fromCharCode(e))
-          .join();
+      var chunk = utf8.decode(utf8Text.sublist(0, splitAt));
       yield chunk;
       utf8Text = utf8Text.sublist(splitAt);
     }
-    yield utf8Text.map((e) => String.fromCharCode(e)).join();
+    yield utf8.decode(utf8Text);
   }
 
   static String mkSSML(TTSConfig config, String escapedText) {
